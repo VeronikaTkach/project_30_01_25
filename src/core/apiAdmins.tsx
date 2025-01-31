@@ -32,6 +32,10 @@ api.interceptors.response.use(
         case 400:
           console.error('Ошибка 400: Неверные аргументы', data.message);
           break;
+        case 401:
+          console.error('Ошибка 401: Неавторизованный пользователь, требуется повторный вход', data.message);
+          localStorage.removeItem('token'); // Очистка токена
+          break;
         case 403:
           console.error('Ошибка 403: Доступ запрещен', data.message);
           break;
@@ -43,6 +47,25 @@ api.interceptors.response.use(
           break;
         default:
           console.error(`Ошибка ${status}:`, data.message);
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Автоматическая проверка роли администратора в интерцепторе
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    if (error.response?.status === 403) {
+      console.warn('403: Пользователь не является администратором, выполняем проверку...');
+      try {
+        const isAdminUser = await isAdmin();
+        if (!isAdminUser) {
+          console.warn('Пользователь не является администратором');
+        }
+      } catch (err) {
+        console.error('Ошибка при проверке роли администратора:', err);
       }
     }
     return Promise.reject(error);
@@ -62,7 +85,20 @@ export interface IAvatarResponse {
   src: string;
 }
 
-// 📌 Функция обработки ошибок
+export interface IIsAdminResponse {
+  isAdmin: boolean;
+}
+
+export interface IReferralResponse {
+  link: string;
+}
+
+export interface IChangePasswordData {
+  oldPassword: string;
+  newPassword: string;
+}
+
+// Функция обработки ошибок
 const handleApiError = (error: unknown, customMessage: string): never => {
   const axiosError = error as AxiosError<{ message?: string }>;
   const errorMessage = axiosError.response?.data?.message || customMessage;
@@ -142,6 +178,61 @@ export const deleteAdminAvatar = async (): Promise<string> => {
       return Promise.reject(new Error('Ошибка 500: Ошибка сервера при удалении аватара.'));
     }
     return handleApiError(axiosError, 'Ошибка удаления аватара администратора');
+  }
+};
+
+// Проверка, является ли пользователь администратором
+export const isAdmin = async (): Promise<boolean> => {
+  try {
+    const response = await api.get<IIsAdminResponse>('/admins/isAdmin');
+    return response.data.isAdmin;
+  } catch (error) {
+    const axiosError = error as AxiosError<{ message?: string }>;
+    if (axiosError.response?.status === 400) {
+      throw new Error('Ошибка 400: Неверные аргументы при проверке роли администратора.');
+    }
+    if (axiosError.response?.status === 500) {
+      throw new Error('Ошибка 500: Ошибка сервера при проверке роли администратора.');
+    }
+    return handleApiError(axiosError, 'Ошибка проверки роли администратора');
+  }
+};
+
+// Получение реферальной ссылки
+export const getReferralLink = async (): Promise<IReferralResponse> => {
+  try {
+    const response = await api.get<IReferralResponse>('/admins/referal');
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<{ message?: string }>;
+    if (axiosError.response?.status === 400) {
+      throw new Error('Ошибка 400: Неверные аргументы при получении реферальной ссылки.');
+    }
+    if (axiosError.response?.status === 500) {
+      throw new Error('Ошибка 500: Ошибка сервера при получении реферальной ссылки.');
+    }
+    return handleApiError(axiosError, 'Ошибка получения реферальной ссылки');
+  }
+};
+
+// Изменение пароля администратора
+export const changePassword = async (data: IChangePasswordData): Promise<string> => {
+  try {
+    const response = await api.patch<string>('/admins/password', data);
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<{ message?: string }>;
+    const { status } = axiosError.response || {};
+    if (status === 400) {
+      throw new Error('Ошибка 400: Неверные аргументы при смене пароля.');
+    }
+    if (status === 403) {
+      throw new Error('Ошибка 403: Недостаточно прав для смены пароля.');
+    }
+    if (status === 500) {
+      throw new Error('Ошибка 500: Ошибка сервера при смене пароля.');
+    }
+    return handleApiError(axiosError, 'Ошибка смены пароля');
   }
 };
 
